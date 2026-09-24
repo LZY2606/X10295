@@ -39,7 +39,15 @@ public class CacheStack<TContext> : CacheStack, ICacheStack<TContext>
 	}
 
 	/// <inheritdoc/>
-	public async ValueTask<T> GetOrSetAsync<T>(string cacheKey, Func<T, TContext, Task<T>> getter, CacheSettings settings)
+	public ValueTask<T> GetOrSetAsync<T>(string cacheKey, Func<T, TContext, Task<T>> getter, CacheSettings settings)
+		=> GetOrSetAsync(cacheKey, getter, settings, default);
+
+	/// <remarks>
+	/// The supplied <paramref name="cancellationToken"/> detaches the calling wait only - shared refresh work continues
+	/// and the context scope remains active until the shared factory invocation has completed.
+	/// </remarks>
+	/// <inheritdoc cref="CacheStack.GetOrSetAsync{T}(string, Func{T, Task{T}}, CacheSettings, System.Threading.CancellationToken)"/>
+	public async ValueTask<T> GetOrSetAsync<T>(string cacheKey, Func<T, TContext, Task<T>> getter, CacheSettings settings, System.Threading.CancellationToken cancellationToken)
 	{
 		ThrowIfDisposed();
 
@@ -58,6 +66,6 @@ public class CacheStack<TContext> : CacheStack, ICacheStack<TContext>
 			using var scope = CacheContextActivator.BeginScope();
 			var context = (TContext)scope.Resolve(typeof(TContext));
 			return await getter(old, context).ConfigureAwait(false);
-		}, settings).ConfigureAwait(false);
+		}, settings, cancellationToken).ConfigureAwait(false);
 	}
 }

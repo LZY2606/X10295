@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using CacheTower.Extensions;
 using CacheTower.Internal;
@@ -178,9 +179,25 @@ public class CacheStack : ICacheStack, IFlushableCacheStack, IExtendableCacheSta
 
 	private async ValueTask InternalSetAsync<T>(string cacheKey, CacheEntry<T> cacheEntry, CacheUpdateType cacheUpdateType)
 	{
+		CacheEntry<T>?[]? previousEntries = null;
+		var failedLayerIndex = -1;
+		Exception? layerFailure = null;
 		for (int i = 0, l = CacheLayers.Length; i < l; i++)
 		{
 			var layer = CacheLayers[i];
+
+			//Read the current entry first (the same public read path the rest of the stack uses)
+			//so a failed write can be restored to exactly what the layer held beforehand.
+			CacheEntry<T>? previousEntry;
+			try
+			{
+				previousEntry = await layer.GetAsync<T>(cacheKey).ConfigureAwait(false);
+			}
+			catch (CacheSerializationException)
+			{
+				//The previous entry cannot be read on this layer - there is nothing restorable.
+				previousEntry = null;
+			}
 
 			try
 			{
@@ -188,11 +205,59 @@ public class CacheStack : ICacheStack, IFlushableCacheStack, IExtendableCacheSta
 			}
 			catch (CacheSerializationException ex)
 			{
+				//Serialization failures mean this entry can never be represented on this layer -
+				//neither the previous nor the new value is cacheable here, so skipping the layer is correct.
 				Logger.LogWarning(ex, "Unable to set CacheKey={CacheKey} on CacheLayer={CacheLayer} due to an exception. This will result in cache misses on this layer.", cacheKey, layer.GetType());
+				continue;
+			}
+			catch (Exception ex)
+			{
+				//A non-serialization failure indicates the layer is unhealthy rather than the value being uncacheable.
+				//Snapshot the pre-write state of every layer so the partial update can be undone completely.
+				failedLayerIndex = i;
+				layerFailure = ex;
+				Logger.LogError(ex, "Failed to set CacheKey={CacheKey} on CacheLayer={CacheLayer}. Rolling back the partial cache update.", cacheKey, layer.GetType());
+				break;
+			}
+
+			if (previousEntry is not null)
+			{
+				previousEntries ??= new CacheEntry<T>?[CacheLayers.Length];
+				previousEntries[i] = previousEntry;
 			}
 		}
 
-		await Extensions.OnCacheUpdateAsync(cacheKey, cacheEntry.Expiry, cacheUpdateType).ConfigureAwait(false);
+		if (failedLayerIndex < 0)
+		{
+			await Extensions.OnCacheUpdateAsync(cacheKey, cacheEntry.Expiry, cacheUpdateType).ConfigureAwait(false);
+		}
+		else
+		{
+			//Restore every layer to exactly what it held before this call: a previous entry is written back,
+			//otherwise the new partial value is evicted. No layer is left half-updated and no change event fires.
+			for (var i = 0; i <= failedLayerIndex; i++)
+			{
+				try
+				{
+					var previousEntry = previousEntries?[i];
+					if (previousEntry is not null)
+					{
+						await CacheLayers[i].SetAsync(cacheKey, previousEntry).ConfigureAwait(false);
+					}
+					else
+					{
+						await CacheLayers[i].EvictAsync(cacheKey).ConfigureAwait(false);
+					}
+				}
+				catch (Exception rollbackEx)
+				{
+					Logger.LogError(rollbackEx, "Failed to roll back CacheKey={CacheKey} on CacheLayer={CacheLayer} after a partial cache update. The layer is unavailable until the cache entry is set again.", cacheKey, CacheLayers[i].GetType());
+				}
+			}
+
+			//Surface the original failure from the cache layer - the rollback only removes the half-updated state.
+			System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(layerFailure!).Throw();
+		}
 	}
 
 	/// <inheritdoc/>
@@ -286,7 +351,25 @@ public class CacheStack : ICacheStack, IFlushableCacheStack, IExtendableCacheSta
 	}
 
 	/// <inheritdoc/>
-	public async ValueTask<T> GetOrSetAsync<T>(string cacheKey, Func<T, Task<T>> valueFactory, CacheSettings settings)
+	public ValueTask<T> GetOrSetAsync<T>(string cacheKey, Func<T, Task<T>> valueFactory, CacheSettings settings)
+		=> GetOrSetAsync(cacheKey, valueFactory, settings, default);
+
+	/// <summary>
+	/// Attempts to retrieve the value for the given <paramref name="cacheKey"/>, falling back to <paramref name="valueFactory"/> when unavailable.
+	/// </summary>
+	/// <remarks>
+	/// Cancelling <paramref name="cancellationToken"/> only detaches the calling wait - it never cancels shared refresh work.
+	/// The factory is always invoked at most once for a concurrent set of callers and its produced entry is still
+	/// published to every cache layer and shared with any other waiters. This keeps call cancellation independent
+	/// from the lifecycle of the shared cache refresh, leaving no temporary key-lock state behind.
+	/// </remarks>
+	/// <typeparam name="T">The type of value in the cache entry.</typeparam>
+	/// <param name="cacheKey">The cache entry's key.</param>
+	/// <param name="valueFactory">The value factory called when no cache entry is available.</param>
+	/// <param name="settings">Cache control settings.</param>
+	/// <param name="cancellationToken">The token used to detach this caller from an in-progress miss or expired refresh.</param>
+	/// <returns>The item from the cache that corresponds to the given <paramref name="cacheKey"/>.</returns>
+	public async ValueTask<T> GetOrSetAsync<T>(string cacheKey, Func<T, Task<T>> valueFactory, CacheSettings settings, CancellationToken cancellationToken)
 	{
 		ThrowIfDisposed();
 
@@ -299,6 +382,8 @@ public class CacheStack : ICacheStack, IFlushableCacheStack, IExtendableCacheSta
 		{
 			throw new ArgumentNullException(nameof(valueFactory));
 		}
+
+		cancellationToken.ThrowIfCancellationRequested();
 
 		var currentTime = DateTimeProvider.Now;
 		var cacheEntryPoint = await GetWithLayerIndexAsync<T>(cacheKey).ConfigureAwait(false);
@@ -333,7 +418,21 @@ public class CacheStack : ICacheStack, IFlushableCacheStack, IExtendableCacheSta
 			cacheEntryStatus = CacheEntryStatus.Miss;
 		}
 
-		return (await RefreshValueAsync(cacheKey, valueFactory, settings, cacheEntryStatus).ConfigureAwait(false))!.Value!;
+		//Only a miss or an expired entry parks the caller in the shared refresh.
+		//Detaching the token must not cancel the refresh itself - observe the shared result independently.
+		var refreshTask = RefreshValueAsync(cacheKey, valueFactory, settings, cacheEntryStatus).AsTask();
+		var completedTask = await Task.WhenAny(refreshTask, Task.Delay(Timeout.Infinite, cancellationToken)).ConfigureAwait(false);
+		if (!ReferenceEquals(completedTask, refreshTask))
+		{
+			//Observe the shared work when it completes so its eventual result or failure is never lost as unobserved state.
+			_ = refreshTask.ContinueWith(
+				static t => { var observed = t.Exception; },
+				TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously
+			);
+			throw new OperationCanceledException(cancellationToken);
+		}
+
+		return (await refreshTask.ConfigureAwait(false))!.Value!;
 	}
 
 	private async ValueTask BackPopulateCacheAsync<T>(int fromIndexExclusive, string cacheKey, CacheEntry<T> cacheEntry)

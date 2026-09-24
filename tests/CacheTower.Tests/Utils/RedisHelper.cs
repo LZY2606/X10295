@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using StackExchange.Redis;
 
 namespace CacheTower.Tests.Utils;
@@ -11,26 +12,21 @@ public static class RedisHelper
 
 	private static readonly ConcurrentQueue<string> Errors = new();
 
-	static RedisHelper()
-	{
-		var connection = GetConnection();
-		connection.ErrorMessage += (sender, args) =>
-		{
-			Errors.Enqueue(args.Message);
-		};
-		connection.InternalError += (sender, args) =>
-		{
-			if (args.Exception is not null)
-			{
-				Errors.Enqueue(args.Exception.Message);
-			}
-		};
-	}
-
 	private static ConnectionMultiplexer Connection { get; set; }
+
+	/// <summary>
+	/// Whether a Redis server is reachable at <see cref="Endpoint"/>. Uses a short TCP probe so tests
+	/// can be explicitly skipped (rather than failed) when no server is available.
+	/// </summary>
+	public static bool IsAvailable => ExternalServiceProbe.IsTcpEndpointAvailable(Endpoint);
 
 	public static ConnectionMultiplexer GetConnection()
 	{
+		if (!IsAvailable)
+		{
+			Assert.Inconclusive($"Redis is not available at {Endpoint}; skipping Redis integration test.");
+		}
+
 		if (Connection == null)
 		{
 			var config = new ConfigurationOptions
@@ -39,6 +35,17 @@ public static class RedisHelper
 			};
 			config.EndPoints.Add(Endpoint);
 			Connection = ConnectionMultiplexer.Connect(config);
+			Connection.ErrorMessage += (sender, args) =>
+			{
+				Errors.Enqueue(args.Message);
+			};
+			Connection.InternalError += (sender, args) =>
+			{
+				if (args.Exception is not null)
+				{
+					Errors.Enqueue(args.Exception.Message);
+				}
+			};
 		}
 		return Connection;
 	}

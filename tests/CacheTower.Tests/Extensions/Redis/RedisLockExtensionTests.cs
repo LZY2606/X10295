@@ -11,6 +11,15 @@ namespace CacheTower.Tests.Extensions.Redis;
 [TestClass]
 public class RedisLockExtensionTests
 {
+	[TestInitialize]
+	public void Setup()
+	{
+		if (!RedisHelper.IsAvailable())
+		{
+			Assert.Inconclusive("Redis is not available at " + RedisHelper.Endpoint);
+		}
+	}
+
 	[TestMethod, ExpectedException(typeof(ArgumentNullException))]
 	public void ThrowForNullConnection()
 	{

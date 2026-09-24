@@ -15,13 +15,20 @@ public class MongoDbCacheLayerTests : BaseCacheLayerTests
 	[TestInitialize]
 	public async Task Setup()
 	{
+		if (!await MongoDbHelper.IsAvailableAsync())
+		{
+			Assert.Inconclusive("MongoDB is not available at " + MongoDbHelper.ConnectionString);
+		}
 		await MongoDbHelper.DropDatabaseAsync();
 	}
 
 	[TestCleanup]
 	public async Task Cleanup()
 	{
-		await MongoDbHelper.DropDatabaseAsync();
+		if (await MongoDbHelper.IsAvailableAsync())
+		{
+			await MongoDbHelper.DropDatabaseAsync();
+		}
 	}
 
 	[TestMethod]

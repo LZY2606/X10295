@@ -35,12 +35,29 @@ public static class RedisHelper
 		{
 			var config = new ConfigurationOptions
 			{
-				AllowAdmin = true
+				AllowAdmin = true,
+				AbortOnConnectFail = false,
+				ConnectTimeout = 1000
 			};
 			config.EndPoints.Add(Endpoint);
 			Connection = ConnectionMultiplexer.Connect(config);
 		}
 		return Connection;
+	}
+
+	/// <summary>
+	/// Checks whether a Redis server is reachable at <see cref="Endpoint"/> so tests can be marked inconclusive instead of failing when no service is available.
+	/// </summary>
+	public static bool IsAvailable()
+	{
+		try
+		{
+			return GetConnection().GetServer(Endpoint).IsConnected;
+		}
+		catch
+		{
+			return false;
+		}
 	}
 
 	/// <summary>

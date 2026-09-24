@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Title>Redis Extensions for Cache Tower</Title>
+    <Description>Provides Distributed Locking &amp; Eviction for Cache Tower</Description>
+    <PackageTags>redis;$(PackageBaseTags)</PackageTags>
+    <Authors>James Turner</Authors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="StackExchange.Redis" Version="2.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CacheTower\CacheTower.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="1.1.1" />
+    <PackageReference Update="TurnerSoftware.BuildVersioning" Version="0.5.0" />
+  </ItemGroup>
+
+</Project>

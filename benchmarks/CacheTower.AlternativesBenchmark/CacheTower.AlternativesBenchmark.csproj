@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net6.0</TargetFrameworks>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+    <PackageReference Include="CacheManager.Core" Version="1.2.0" />
+    <PackageReference Include="CacheManager.Microsoft.Extensions.Caching.Memory" Version="1.2.0" />
+    <PackageReference Include="CacheManager.Serialization.ProtoBuf" Version="1.2.0" />
+    <PackageReference Include="CacheManager.StackExchange.Redis" Version="1.2.0" />
+    <PackageReference Include="EasyCaching.Disk" Version="1.9.2" />
+    <PackageReference Include="EasyCaching.InMemory" Version="1.9.2" />
+    <PackageReference Include="EasyCaching.Redis" Version="1.9.2" />
+    <PackageReference Include="EasyCaching.Serialization.Protobuf" Version="1.9.2" />
+    <PackageReference Include="IntelligentHack.IntelligentCache" Version="3.3.0" />
+    <PackageReference Include="LazyCache" Version="2.4.0" />
+    <PackageReference Include="ZiggyCreatures.FusionCache" Version="1.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CacheTower.Providers.FileSystem.Json\CacheTower.Providers.FileSystem.Json.csproj" />
+    <ProjectReference Include="..\..\src\CacheTower.Providers.FileSystem.Protobuf\CacheTower.Providers.FileSystem.Protobuf.csproj" />
+    <ProjectReference Include="..\..\src\CacheTower.Providers.Redis\CacheTower.Providers.Redis.csproj" />
+    <ProjectReference Include="..\..\src\CacheTower.Serializers.SystemTextJson\CacheTower.Serializers.SystemTextJson.csproj" />
+    <ProjectReference Include="..\..\src\CacheTower\CacheTower.csproj" />
+  </ItemGroup>
+
+</Project>

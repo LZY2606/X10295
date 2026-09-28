@@ -1,7 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net462;net6.0;net7.0</TargetFrameworks>
+    <TargetFrameworks>net6.0;net7.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(OS)' == 'Windows_NT'">net462;net6.0;net7.0</TargetFrameworks>
+    <!--
+      The .NET Framework target needs the Mono host which is only available on Windows CI agents.
+      Roll forward the .NET Core test targets onto newer runtimes so the fixed acceptance
+      dotnet test command works on machines without the exact EOL runtimes installed.
+    -->
+    <RollForward>LatestMajor</RollForward>
     <IsPackable>false</IsPackable>
     <LangVersion>Latest</LangVersion>
   </PropertyGroup>
